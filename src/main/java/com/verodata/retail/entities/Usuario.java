@@ -19,7 +19,7 @@ public class Usuario {
     private String email;
 
     @Column(nullable = false, length = 255)
-    private String password; // Se guardará cifrada por Spring Security
+    private String password; // Se guardará cifrada más adelante
 
     @Column(nullable = false, length = 100)
     private String nombre;
