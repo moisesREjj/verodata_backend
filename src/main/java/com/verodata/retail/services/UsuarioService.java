@@ -78,4 +78,9 @@ public class UsuarioService {
     public void eliminarPorId(Long id) {
         usuarioRepository.deleteById(id);
     }
+
+    @Transactional(readOnly = true)
+    public Optional<Usuario> buscarPorEmail(String email) {
+        return usuarioRepository.findByEmail(email);
+    }
 }

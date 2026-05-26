@@ -1,6 +1,8 @@
 package com.verodata.retail.controllers;
 
+import com.verodata.retail.entities.LoginRequest;
 import com.verodata.retail.entities.Usuario;
+import com.verodata.retail.services.JwtService;
 import com.verodata.retail.services.UsuarioService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -12,9 +14,12 @@ import java.util.Map;
 public class AuthController {
 
     private final UsuarioService usuarioService;
+    private final JwtService jwtService; // 1. Atributo nuevo añadido
 
-    public AuthController(UsuarioService usuarioService) {
+    // 2. Constructor actualizado recibiendo AMBOS servicios separados por una coma
+    public AuthController(UsuarioService usuarioService, JwtService jwtService) {
         this.usuarioService = usuarioService;
+        this.jwtService = jwtService; // 3. Asignación obligatoria para evitar el error
     }
 
     // Ruta final: http://localhost:8081/api/auth/registrar
@@ -81,5 +86,30 @@ public class AuthController {
             usuarioService.eliminarPorId(id);
             return ResponseEntity.ok("Usuario eliminado correctamente");
         }).orElse(ResponseEntity.notFound().build());
+    }
+    @PostMapping("/login")
+    public ResponseEntity<?> login(@RequestBody LoginRequest loginRequest) {
+        // 1. Buscar al usuario por correo electrónico
+        return usuarioService.buscarPorEmail(loginRequest.getEmail()).map(usuario -> {
+
+            // 2. Validar si la contraseña coincide con la encriptada en la BD
+            org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder encoder =
+                    new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder();
+
+            if (encoder.matches(loginRequest.getPassword(), usuario.getPassword())) {
+
+                // 3. Si es correcta, fabricamos el Token JWT
+                String token = jwtService.generarToken(usuario);
+
+                // Formamos la respuesta JSON para enviar a Postman
+                java.util.Map<String, String> respuesta = new java.util.HashMap<>();
+                respuesta.put("mensaje", "¡Inicio de sesión exitoso!");
+                respuesta.put("token", token);
+                return ResponseEntity.ok(respuesta);
+
+            } else {
+                return ResponseEntity.status(401).body("Contraseña incorrecta.");
+            }
+        }).orElse(ResponseEntity.status(404).body("El usuario con ese correo no está registrado."));
     }
 }
