@@ -2,9 +2,13 @@ package com.verodata.retail.controllers;
 
 import com.verodata.retail.entities.LoginRequest;
 import com.verodata.retail.entities.Usuario;
+import com.verodata.retail.entities.ClienteDetalle;
+import com.verodata.retail.entities.AnalistaDetalle;
+import com.verodata.retail.entities.AdminDetalle;
 import com.verodata.retail.services.JwtService;
 import com.verodata.retail.services.UsuarioService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -17,17 +21,15 @@ public class AuthController {
     private final UsuarioService usuarioService;
     private final JwtService jwtService;
 
-
     public AuthController(UsuarioService usuarioService, JwtService jwtService) {
         this.usuarioService = usuarioService;
         this.jwtService = jwtService;
     }
 
-    // Ruta final: http://localhost:8081/api/auth/registrar
     @PostMapping("/registrar")
     public ResponseEntity<?> registrar(
-            @RequestBody Map<String, Object> request, // Cambiado a Object para soportar JSON anidado
-            @RequestParam(required = false) String nombreRol // Atrapa el parámetro de la URL si existe
+            @RequestBody Map<String, Object> request,
+            @RequestParam(required = false) String nombreRol
     ) {
         try {
             Usuario nuevoUsuario = new Usuario();
@@ -36,57 +38,84 @@ public class AuthController {
             nuevoUsuario.setPassword((String) request.get("password"));
 
             // --- LÓGICA DE PRIORIZACIÓN DE ROL INTEGRADA ---
-            String rolFinal = "ROLE_CLIENTE"; // Valor base por defecto
+            String rolFinal = "ROLE_CLIENTE";
 
-            // Prioridad 1: Si se envió por Query Parameter en la URL (?nombreRol=...)
             if (nombreRol != null && !nombreRol.trim().isEmpty()) {
                 rolFinal = nombreRol.trim();
             }
-            // Prioridad 2: Si viene en el JSON
             else if (request.get("rol") != null) {
                 Object rolObj = request.get("rol");
 
                 if (rolObj instanceof Map) {
-                    // Si viene anidado como en tu primer intento: "rol": { "nombre": "ROLE_ADMIN" }
                     Map<?, ?> rolMap = (Map<?, ?>) rolObj;
                     if (rolMap.get("nombre") != null) {
                         rolFinal = rolMap.get("nombre").toString().trim();
                     }
                 } else {
-                    // Si viene plano en el JSON: "rol": "ROLE_ADMIN"
                     rolFinal = rolObj.toString().trim();
                 }
             }
 
-            // Llamamos a tu servicio pasándole el objeto armado y el rol resuelto de forma dinámica
+            // Sanitización estricta para control de flujo
+            rolFinal = rolFinal.toUpperCase();
+
+            // --- RESOLUCIÓN Y CAPTURA DE DATOS ANIDADOS SEGÚN EL ROL CORPORATIVO ---
+            switch (rolFinal) {
+                case "ROLE_CLIENTE":
+                    if (request.containsKey("datosCliente")) {
+                        Map<?, ?> datos = (Map<?, ?>) request.get("datosCliente");
+                        ClienteDetalle cd = new ClienteDetalle();
+                        cd.setDireccionEnvio(datos.get("direccionEnvio") != null ? datos.get("direccionEnvio").toString() : null);
+                        cd.setCodigoPostal(datos.get("codigoPostal") != null ? datos.get("codigoPostal").toString() : null);
+                        cd.setTelefono(datos.get("telefono") != null ? datos.get("telefono").toString() : null);
+                        nuevoUsuario.setClienteDetalle(cd);
+                    }
+                    break;
+
+                case "ROLE_ANALISTA":
+                    if (request.containsKey("datosAnalista")) {
+                        Map<?, ?> datos = (Map<?, ?>) request.get("datosAnalista");
+                        AnalistaDetalle ad = new AnalistaDetalle();
+                        ad.setRegionAsignada(datos.get("regionAsignada") != null ? datos.get("regionAsignada").toString() : null);
+                        ad.setNivelAccesoDashboard(datos.get("nivelAccesoDashboard") != null ? datos.get("nivelAccesoDashboard").toString() : null);
+                        ad.setEspecialidad(datos.get("especialidad") != null ? datos.get("especialidad").toString() : null);
+                        nuevoUsuario.setAnalistaDetalle(ad);
+                    }
+                    break;
+
+                case "ROLE_ADMIN":
+                    if (request.containsKey("datosAdmin")) {
+                        Map<?, ?> datos = (Map<?, ?>) request.get("datosAdmin");
+                        AdminDetalle adm = new AdminDetalle();
+                        adm.setSedeSupervisada(datos.get("sedeSupervisada") != null ? datos.get("sedeSupervisada").toString() : null);
+                        adm.setCodigoEmpleado(datos.get("codigoEmpleado") != null ? datos.get("codigoEmpleado").toString() : null);
+                        nuevoUsuario.setAdminDetalle(adm);
+                    }
+                    break;
+            }
+
+            // Consérvase la ejecución original del servicio que cifra contraseñas y asigna el rol en base de datos
             Usuario usuarioGuardado = usuarioService.registrarUsuario(nuevoUsuario, rolFinal);
 
-            return ResponseEntity.ok(Map.of(
-                    "mensaje", "¡Usuario registrado exitosamente!",
-                    "id", usuarioGuardado.getId(),
-                    "email", usuarioGuardado.getEmail(),
-                    "rol", usuarioGuardado.getRol() != null ? usuarioGuardado.getRol().getNombre() : "SIN_ROL"
-            ));
+            return ResponseEntity.status(HttpStatus.CREATED).body(usuarioGuardado);
+
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
 
-    // 1. READ - Obtener todos los usuarios
     @GetMapping("/usuarios")
     public ResponseEntity<?> obtenerTodos() {
         return ResponseEntity.ok(usuarioService.obtenerTodos());
     }
 
-    // 2. READ - Buscar un usuario específico por su ID
     @GetMapping("/usuarios/{id}")
     public ResponseEntity<?> obtenerPorId(@PathVariable Long id) {
-        // .findById(id) busca por su llave primaria
         return usuarioService.buscarPorId(id)
                 .map(usuario -> ResponseEntity.ok(usuario))
                 .orElse(ResponseEntity.notFound().build());
     }
-    // Nueva ruta JPQL: http://localhost:8081/api/auth/usuarios/rol/ROLE_ADMIN
+
     @GetMapping("/usuarios/rol/{nombreRol}")
     public ResponseEntity<?> obtenerUsuariosPorRol(@PathVariable String nombreRol) {
         List<Usuario> usuarios = usuarioService.buscarPorRol(nombreRol);
@@ -96,25 +125,25 @@ public class AuthController {
         return ResponseEntity.ok(usuarios);
     }
 
-    // 3. UPDATE - Actualizar los datos de un usuario existente
     @PutMapping("/usuarios/{id}")
     public ResponseEntity<?> actualizarUsuario(@PathVariable Long id, @RequestBody Usuario datosNuevos) {
         return usuarioService.buscarPorId(id).map(usuarioExistente -> {
-            // Le pasamos los datos nuevos al usuario que ya existe
             usuarioExistente.setNombre(datosNuevos.getNombre());
             usuarioExistente.setEmail(datosNuevos.getEmail());
 
-            // ¡Magia! Como usuarioExistente YA TIENE UN ID, .save() hará un UPDATE en vez de un INSERT
+            // Si en la actualización envían detalles de objetos hijos, se actualizan dinámicamente
+            if (datosNuevos.getClienteDetalle() != null) usuarioExistente.setClienteDetalle(datosNuevos.getClienteDetalle());
+            if (datosNuevos.getAnalistaDetalle() != null) usuarioExistente.setAnalistaDetalle(datosNuevos.getAnalistaDetalle());
+            if (datosNuevos.getAdminDetalle() != null) usuarioExistente.setAdminDetalle(datosNuevos.getAdminDetalle());
+
             Usuario usuarioActualizado = usuarioService.guardar(usuarioExistente);
             return ResponseEntity.ok(usuarioActualizado);
         }).orElse(ResponseEntity.notFound().build());
     }
 
-    // 4. DELETE - Eliminar un usuario por su ID
     @DeleteMapping("/usuarios/{id}")
     public ResponseEntity<?> eliminarUsuario(@PathVariable Long id) {
         return usuarioService.buscarPorId(id).map(usuario -> {
-            // .deleteById(id) borra el registro físicamente de PostgreSQL
             usuarioService.eliminarPorId(id);
             return ResponseEntity.ok("Usuario eliminado correctamente");
         }).orElse(ResponseEntity.notFound().build());
@@ -122,18 +151,16 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest loginRequest) {
-        // 1. Buscar al usuario por correo electrónico
         return usuarioService.buscarPorEmail(loginRequest.getEmail()).map(usuario -> {
-            // 2. Validar si la contraseña coincide con la encriptada en la BD
             org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder encoder =
                     new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder();
 
             if (encoder.matches(loginRequest.getPassword(), usuario.getPassword())) {
-                String token = jwtService.generarToken(usuario); // 3. Si es correcta, fabricamos el Token JWT
-                // Formamos la respuesta JSON para enviar a Postman
-                java.util.Map<String, String> respuesta = new java.util.HashMap<>();
+                String token = jwtService.generarToken(usuario);
+                java.util.Map<String, Object> respuesta = new java.util.HashMap<>();
                 respuesta.put("mensaje", "¡Inicio de sesión exitoso!");
                 respuesta.put("token", token);
+                respuesta.put("usuario", usuario); // Retorna el objeto completo hidratado
                 return ResponseEntity.ok(respuesta);
             } else {
                 return ResponseEntity.status(401).body("Contraseña incorrecta.");

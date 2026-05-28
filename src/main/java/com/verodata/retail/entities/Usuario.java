@@ -19,7 +19,7 @@ public class Usuario {
     private String email;
 
     @Column(nullable = false, length = 255)
-    private String password; // Se guardará cifrada más adelante
+    private String password;
 
     @Column(nullable = false, length = 100)
     private String nombre;
@@ -27,4 +27,17 @@ public class Usuario {
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "id_rol", nullable = false)
     private Rol rol;
+
+    // --- NUEVAS RELACIONES POLIMÓRFICAS EN CASCADA COMPLETA ---
+    @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.EAGER, orphanRemoval = true)
+    @JoinColumn(name = "id_cliente_detalle")
+    private ClienteDetalle clienteDetalle;
+
+    @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.EAGER, orphanRemoval = true)
+    @JoinColumn(name = "id_analista_detalle")
+    private AnalistaDetalle analistaDetalle;
+
+    @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.EAGER, orphanRemoval = true)
+    @JoinColumn(name = "id_admin_detalle")
+    private AdminDetalle adminDetalle;
 }

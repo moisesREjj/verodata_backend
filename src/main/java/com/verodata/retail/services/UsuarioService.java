@@ -18,7 +18,7 @@ public class UsuarioService {
     private final RolRepository rolRepository;
     private final BCryptPasswordEncoder passwordEncoder;
 
-    // Inyección de dependencias por constructor
+    // Inyección de dependencias por constructor unificado
     public UsuarioService(UsuarioRepository usuarioRepository, RolRepository rolRepository) {
         this.usuarioRepository = usuarioRepository;
         this.rolRepository = rolRepository;
@@ -26,56 +26,54 @@ public class UsuarioService {
     }
 
     @Transactional
-    public Usuario registrarUsuario(Usuario usuario, String nombreRol) {
-        // 1. Validar que el correo electrónico no esté registrado (Mantiene tu lógica original)
+    public Usuario registrarUsuario(Usuario usuario, String rolFinal) {
+        // 1. Validar que el correo electrónico no esté registrado (Mantiene tu regla de negocio original)
         if (usuarioRepository.findByEmail(usuario.getEmail()).isPresent()) {
             throw new RuntimeException("El correo ya se encuentra registrado.");
         }
-        // Establecemos el rol predeterminado como ROLE_CLIENTE
-        String rolFinal = "ROLE_CLIENTE";
 
-        // Regla A: Si se definió un rol a través de la URL (?nombreRol=...)
-        if (nombreRol != null && !nombreRol.trim().isEmpty()) {
-            rolFinal = nombreRol.trim();
-        }
-        // Regla B: Si no vino en la URL, pero sí vino estructurado dentro del Body JSON
-        else if (usuario.getRol() != null && usuario.getRol().getNombre() != null && !usuario.getRol().getNombre().trim().isEmpty()) {
-            rolFinal = usuario.getRol().getNombre().trim();
-        }
-        // 2. Buscar si el Rol determinado existe, si no, lo creamos dinámicamente
-        String nombreParaBuscar = rolFinal;
+        // 2. Sanitizar el rol final procesado de forma limpia
+        String nombreParaBuscar = (rolFinal != null && !rolFinal.trim().isEmpty())
+                ? rolFinal.trim().toUpperCase()
+                : "ROLE_CLIENTE";
+
+        // 3. Buscar si el Rol determinado existe en PostgreSQL, si no, lo creamos dinámicamente
         Rol rol = rolRepository.findByNombre(nombreParaBuscar)
                 .orElseGet(() -> {
                     Rol nuevoRol = new Rol();
                     nuevoRol.setNombre(nombreParaBuscar);
                     return rolRepository.save(nuevoRol);
                 });
-        // 3. ENCRIPTAR la contraseña usando BCrypt
+
+        // 4. ENCRIPTAR la contraseña usando el BCryptPasswordEncoder corporativo
         String passwordEncriptada = passwordEncoder.encode(usuario.getPassword());
         usuario.setPassword(passwordEncriptada);
-        usuario.setRol(rol); // Asignamos el rol al usuario
-        return usuarioRepository.save(usuario); // 4. Guardar en la base de datos de PostgreSQL
+
+        // 5. Vincular el rol al grafo de objetos del usuario
+        usuario.setRol(rol);
+
+        return usuarioRepository.save(usuario);
     }
 
-    // 1. Método general para Guardar/Actualizar
+    // Método general para Guardar/Actualizar
     @Transactional
     public Usuario guardar(Usuario usuario) {
         return usuarioRepository.save(usuario);
     }
 
-    // 2. Obtener la lista completa de todos los usuarios de la base de datos
+    // Obtener la lista completa de todos los usuarios de la base de datos
     @Transactional(readOnly = true)
     public List<Usuario> obtenerTodos() {
         return usuarioRepository.findAll();
     }
 
-    // 3. Buscar un usuario específico usando su ID único
+    // Buscar un usuario específico usando su ID único
     @Transactional(readOnly = true)
     public Optional<Usuario> buscarPorId(Long id) {
         return usuarioRepository.findById(id);
     }
 
-    // 4. DELETE - Eliminar el registro físicamente de PostgreSQL por su ID
+    // DELETE - Eliminar el registro físicamente de PostgreSQL en cascada por su ID
     @Transactional
     public void eliminarPorId(Long id) {
         usuarioRepository.deleteById(id);
@@ -85,7 +83,8 @@ public class UsuarioService {
     public Optional<Usuario> buscarPorEmail(String email) {
         return usuarioRepository.findByEmail(email);
     }
-    // Consulta personalizada usando JPQL para filtrar por Rol
+
+    // Consulta personalizada usando tu consulta nativa conceptual JPQL para filtrar por Rol
     @Transactional(readOnly = true)
     public List<Usuario> buscarPorRol(String nombreRol) {
         return usuarioRepository.buscarUsuariosPorNombreDeRol(nombreRol);
